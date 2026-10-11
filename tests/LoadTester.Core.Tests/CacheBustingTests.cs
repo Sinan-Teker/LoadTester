@@ -16,7 +16,7 @@ public class CacheBustingTests
     private static HttpRequestMessage CreateRequest(ScenarioDefinition definition, int step = 0)
     {
         var scenario = CompiledScenario.Compile(definition);
-        using var user = new VirtualUser(1, new HttpMessageInvoker(new SocketsHttpHandler()), cookies: null);
+        using var user = new VirtualUser(1, () => new HttpMessageInvoker(new SocketsHttpHandler()), cookies: null);
         user.BeginIteration(scenario);
         return scenario.Steps[step].CreateRequest(user, scenario);
     }

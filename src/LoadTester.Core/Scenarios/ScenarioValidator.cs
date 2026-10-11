@@ -1,3 +1,4 @@
+using System.Net.Quic;
 using System.Text.RegularExpressions;
 using LoadTester.Core.Extraction;
 using LoadTester.Core.Templates;
@@ -39,6 +40,9 @@ public static class ScenarioValidator
         {
             errors.Add("Temel URL, http:// veya https:// ile başlayan geçerli bir adres olmalı.");
         }
+
+        if (scenario.Settings.HttpVersion == HttpProtocolVersion.Http3 && IsPlainHttp(scenario.BaseUrl))
+            errors.Add("Temel URL: HTTP/3 yalnızca https:// adreslerle kullanılabilir.");
 
         foreach (var variable in scenario.Variables)
             CheckTemplate(variable.Value, $"\"{variable.Name.Trim()}\" değişkeni", defined, errors);
@@ -96,6 +100,9 @@ public static class ScenarioValidator
 
         if (settings.CacheBusting && !IsQueryName(settings.CacheBustingParameter.Trim()))
             errors.Add("Önbellek atlama parametresinin adı boş olamaz; harf, rakam, _, - ve . kullanılabilir.");
+
+        if (settings.HttpVersion == HttpProtocolVersion.Http3 && !IsQuicSupported())
+            errors.Add("Bu bilgisayarda HTTP/3 kullanılamıyor: işletim sistemi QUIC desteklemiyor (Windows 11, Windows Server 2022 ya da libmsquic kurulu Linux gerekir).");
     }
 
     private static void ValidateStep(ScenarioDefinition scenario, StepDefinition step, string label, HashSet<string> defined, List<string> errors)
@@ -117,6 +124,9 @@ public static class ScenarioValidator
             else if (!hasBaseUrl)
                 errors.Add($"{label}: göreli URL için senaryoya temel URL girin ya da tam adres yazın.");
         }
+
+        if (scenario.Settings.HttpVersion == HttpProtocolVersion.Http3 && IsPlainHttp(url))
+            errors.Add($"{label}: HTTP/3 yalnızca https:// adreslerle kullanılabilir.");
 
         ValidateHeaders(step.Headers, $"{label} başlıkları", defined, errors);
 
@@ -187,6 +197,14 @@ public static class ScenarioValidator
 
     private static bool IsHttpUrl(string text) =>
         Uri.TryCreate(text, UriKind.Absolute, out var uri) && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+
+    /// <summary>Unencrypted address, placeholders or not. HTTP/3 always runs over TLS.</summary>
+    private static bool IsPlainHttp(string? url) =>
+        url is not null && url.TrimStart().StartsWith("http://", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>HTTP/3 needs QUIC from the operating system (msquic).</summary>
+    private static bool IsQuicSupported() =>
+        (OperatingSystem.IsWindows() || OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()) && QuicConnection.IsSupported;
 
     /// <summary>RFC 9110 token: visible ASCII without separators.</summary>
     private static bool IsToken(string text) =>

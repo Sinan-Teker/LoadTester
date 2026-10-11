@@ -4,13 +4,14 @@ using LoadTester.Core.Templates;
 namespace LoadTester.Core.Engine;
 
 /// <summary>One simulated user: its own connections, cookie jar and variables. Used by one iteration at a time.</summary>
-internal sealed class VirtualUser(int id, HttpMessageInvoker client, CookieContainer? cookies) : ITemplateContext, IDisposable
+/// <param name="createClient">Creates the user's connection pool; called again by <see cref="RenewClient"/>.</param>
+internal sealed class VirtualUser(int id, Func<HttpMessageInvoker> createClient, CookieContainer? cookies) : ITemplateContext, IDisposable
 {
     private readonly Dictionary<string, string> _variables = new(StringComparer.Ordinal);
 
     public int VirtualUserId { get; } = id;
     public long Iteration { get; private set; }
-    public HttpMessageInvoker Client { get; } = client;
+    public HttpMessageInvoker Client { get; private set; } = createClient();
 
     /// <summary>Starts a fresh session: variables are evaluated again and cookies are dropped.</summary>
     public void BeginIteration(CompiledScenario scenario)
@@ -31,6 +32,13 @@ internal sealed class VirtualUser(int id, HttpMessageInvoker client, CookieConta
     public void SetVariable(string name, string value) => _variables[name] = value;
 
     public bool TryGetVariable(string name, out string value) => _variables.TryGetValue(name, out value!);
+
+    /// <summary>Closes the user's connections so the next request opens new ones. Cookies are kept.</summary>
+    public void RenewClient()
+    {
+        Client.Dispose();
+        Client = createClient();
+    }
 
     public void Dispose() => Client.Dispose();
 }

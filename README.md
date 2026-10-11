@@ -40,7 +40,7 @@ Yayına almak için: `dotnet publish src/LoadTester.Web -c Release -o publish` (
 | Değişkenler | Satır başına `ad=değer`. Adımlarda `{{ad}}` olarak kullanılır. |
 | Ortak başlıklar | Satır başına `Ad: değer`; tüm adımlara eklenir, adımda aynı adlı başlık varsa o kullanılır. |
 | Adımlar | Her iterasyonda yukarıdan aşağıya sırayla çalışan HTTP istekleri. |
-| İstek ayarları | Zaman aşımı, adımlar arası bekleme (rastgele en az–en çok), yönlendirme, çerez, sertifika ve önbellek atlama ayarları. |
+| İstek ayarları | Zaman aşımı, adımlar arası bekleme (rastgele en az–en çok), HTTP sürümü, yönlendirme, çerez, sertifika ve önbellek atlama ayarları. |
 
 ### Yük profili
 
@@ -87,9 +87,28 @@ CDN, ters vekil sunucu (nginx, Varnish vb.) ya da uygulama önbelleği arkasınd
 
 Parametrenin adı (`_cb`) değiştirilebilir: API'niz bilinmeyen parametreleri reddediyorsa kabul ettiği bir adı seçin; CDN'iniz bazı parametreleri önbellek anahtarına katmıyorsa onlardan farklı bir ad kullanın. POST, PUT gibi istekler önbelleğe alınmadığı için değiştirilmez. Yalnızca belirli adımlarda önbelleği atlamak isterseniz ayarı kapalı bırakıp o adımların URL'sine `?v={{$guid}}` ekleyebilirsiniz.
 
+### HTTP sürümü
+
+**İstek ayarları → HTTP sürümü** ile isteklerin hangi protokolle gönderileceği seçilir:
+
+| Seçim | Davranış |
+|---|---|
+| Varsayılan | İstekler HTTP/1.1 ile gönderilir; sunucu daha yeni bir sürümü desteklese de kullanılmaz. |
+| HTTP/2 | `https` adreslerde sürüm TLS el sıkışmasında (ALPN) kararlaştırılır. `http` adreslerde istek doğrudan HTTP/2 ile gönderilir; sunucunun şifresiz HTTP/2'yi (h2c) desteklemesi gerekir. |
+| HTTP/3 | QUIC (UDP) üzerinden, adresteki sunucu ve bağlantı noktasına gönderilir; yalnızca `https` adreslerle kullanılabilir. İşletim sisteminin QUIC desteklemesi gerekir: Windows 11, Windows Server 2022 ya da `libmsquic` kurulu Linux. |
+
+Seçilen sürüm zorunludur: sunucu (ya da aradaki CDN, yük dengeleyici) bu sürümü desteklemiyorsa daha düşük bir sürüme geçilmez, istek başarısız sayılır ve nedeni hata tablosunda görünür (ör. `TLS/SSL hatası: İstemci ile sunucu arasında ortak bir uygulama protokolü yok`). Böylece sonuçların gerçekten seçilen sürümü ölçtüğünden emin olursunuz.
+
+Her sanal kullanıcının kendi bağlantısı olduğundan HTTP/2 ve HTTP/3'te de kullanıcı başına bir bağlantı açılır ve adımlar sırayla çalıştığı için bir bağlantıda aynı anda tek istek bulunur.
+
+HTTP/3'te:
+
+- Alınan ve gönderilen veri miktarı ölçülmez (sayaç TCP bağlantıları üzerinde çalışır); raporda "—" olarak gösterilir.
+- Yanıt alınamayan bir istekten sonra o kullanıcı yeni bir bağlantıyla devam eder. .NET, QUIC bağlantısı kurulamayan bir sunucuya HTTP/3'ü bir süre kapattığından aksi hâlde sonraki istekler hiç gönderilmeden başarısız sayılırdı.
+
 ### Bir isteğin başarısız sayıldığı durumlar
 
-Bağlantı kurulamaması, zaman aşımı, beklenmeyen durum kodu, aranan metnin bulunamaması ve değişkenin çıkarılamaması. Hatalar adım ve neden bazında gruplanarak gösterilir.
+Bağlantı kurulamaması, zaman aşımı, beklenmeyen durum kodu, aranan metnin bulunamaması, değişkenin çıkarılamaması ve seçilen HTTP sürümünün kullanılamaması. Hatalar adım ve neden bazında gruplanarak gösterilir.
 
 ## Ölçümler
 
@@ -99,7 +118,7 @@ Bağlantı kurulamaması, zaman aşımı, beklenmeyen durum kodu, aranan metnin 
 | Yanıt süresi: ortalama, en az, p50, p90, p95, p99, en çok | İstek gönderiminden gövdenin tamamı okunana kadar; hatalı istekler dahildir. Yüzdelikler yaklaşık %0,5 hassasiyetli bir histogramla hesaplanır. |
 | Durum kodları | Adım bazında dağılım |
 | Sanal kullanıcı, iterasyon, atlanan iterasyon | Sabit hız modunda eş zamanlılık |
-| Alınan / gönderilen veri | Bağlantı üzerindeki bayt (başlıklar ve TLS dahil) |
+| Alınan / gönderilen veri | Bağlantı üzerindeki bayt (başlıklar ve TLS dahil); HTTP/3'te ölçülmez |
 
 Grafikler saniyelik örneklerden çizilir; uzun testlerde okunaklı kalması için en çok 180 noktaya ortalanır.
 

@@ -240,6 +240,15 @@ else
                 <input type="number" min="0" @bind="form.Settings.ThinkTimeMaxMs" />
             </label>
         </div>
+        <label class="field narrow">
+            <span class="label">HTTP sürümü</span>
+            <select @bind="form.Settings.HttpVersion">
+                <option value="">Varsayılan (HTTP/1.1)</option>
+                <option value="@HttpProtocolVersion.Http2">HTTP/2</option>
+                <option value="@HttpProtocolVersion.Http3">HTTP/3</option>
+            </select>
+            <span class="hint">@HttpVersionHint(form.Settings.HttpVersion)</span>
+        </label>
         <div class="checks">
             <label class="check"><input type="checkbox" @bind="form.Settings.FollowRedirects" /> Yönlendirmeleri takip et</label>
             <label class="check"><input type="checkbox" @bind="form.Settings.UseCookies" /> Çerezleri sakla <span class="hint">(her iterasyonda sıfırlanır)</span></label>
@@ -373,6 +382,13 @@ else
         ExtractorSource.JsonPath => "$.data.token",
         ExtractorSource.Regex => "\"id\":\\s*(\\d+)",
         _ => "X-Request-Id",
+    };
+
+    private static string HttpVersionHint(HttpProtocolVersion? version) => version switch
+    {
+        HttpProtocolVersion.Http2 => "Sunucu HTTP/2 desteklemiyorsa istekler başarısız sayılır. http:// adreslerde sunucunun şifresiz HTTP/2'yi (h2c) desteklemesi gerekir.",
+        HttpProtocolVersion.Http3 => "QUIC (UDP) üzerinden, yalnızca https:// adreslerle. Sunucu desteklemiyorsa istekler başarısız sayılır. Veri miktarı ölçülmez.",
+        _ => "İstekler HTTP/1.1 ile gönderilir.",
     };
 
     private async Task SaveAsync() => await SaveCoreAsync();

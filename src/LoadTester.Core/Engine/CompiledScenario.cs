@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -104,6 +105,7 @@ internal sealed class CompiledStep
     private readonly bool _hasUserAgent;
     private readonly string? _cacheBustingParameter;
     private readonly (string Name, string Value)[] _cacheHeaders = [];
+    private readonly Version? _version;
 
     public CompiledStep(int index, StepDefinition step, IEnumerable<NameValue> commonHeaders, RequestSettings settings)
     {
@@ -149,6 +151,13 @@ internal sealed class CompiledStep
                 .Where(h => !_headers.Any(x => x.Name.Equals(h.Name, StringComparison.OrdinalIgnoreCase)))
                 .ToArray();
         }
+
+        _version = settings.HttpVersion switch
+        {
+            HttpProtocolVersion.Http2 => HttpVersion.Version20,
+            HttpProtocolVersion.Http3 => HttpVersion.Version30,
+            _ => null,
+        };
     }
 
     public int Index { get; }
@@ -167,6 +176,13 @@ internal sealed class CompiledStep
     {
         var cacheBuster = _cacheBustingParameter is null ? null : _cacheBustingParameter + "=" + Guid.NewGuid().ToString("N");
         var request = new HttpRequestMessage(Method, scenario.ResolveUri(Url.Render(user), user, cacheBuster));
+        if (_version is not null)
+        {
+            // Exact, so a run never reports HTTP/1.1 results as the chosen version.
+            request.Version = _version;
+            request.VersionPolicy = HttpVersionPolicy.RequestVersionExact;
+        }
+
         if (_body is not null)
         {
             request.Content = new ByteArrayContent(Encoding.UTF8.GetBytes(_body.Render(user)));

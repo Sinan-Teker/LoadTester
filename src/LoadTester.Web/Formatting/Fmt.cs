@@ -80,6 +80,13 @@ public static class Fmt
 
     public static string LoadUnit(LoadMode mode) => mode == LoadMode.VirtualUsers ? "kullanıcı" : "iterasyon/sn";
 
+    public static string HttpVersion(HttpProtocolVersion version) => version switch
+    {
+        HttpProtocolVersion.Http2 => "HTTP/2",
+        HttpProtocolVersion.Http3 => "HTTP/3",
+        _ => version.ToString(),
+    };
+
     public static string StatusLabel(RunStatus status) => status switch
     {
         RunStatus.Running => "Çalışıyor",

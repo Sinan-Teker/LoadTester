@@ -25,7 +25,7 @@ else
             <a class="back" href="runs">← Test geçmişi</a>
             <h1>@_name <StatusBadge Status="_status" /></h1>
             <p class="page-sub">
-                #@Id · @Fmt.Timestamp(_startedAt) · @Fmt.LoadSummary(_definition.Load)@(_definition.Settings.CacheBusting ? " · önbellek atlama açık" : "")
+                #@Id · @Fmt.Timestamp(_startedAt) · @Fmt.LoadSummary(_definition.Load)@(_definition.Settings.HttpVersion is { } version ? " · " + Fmt.HttpVersion(version) : "")@(_definition.Settings.CacheBusting ? " · önbellek atlama açık" : "")
             </p>
         </div>
         <div class="head-actions">
@@ -76,6 +76,8 @@ else
     else
     {
         var report = _report;
+        // Bytes are counted on TCP connections; HTTP/3 runs over QUIC instead.
+        var trafficMeasured = _definition.Settings.HttpVersion != HttpProtocolVersion.Http3;
         <section class="stats" aria-label="Özet">
             <StatTile Label="Toplam istek" Value="@Fmt.Count(report.Requests)" />
             <StatTile Label="İstek/sn" Value="@Fmt.Rate(report.RequestsPerSecond)" Note="ortalama" />
@@ -92,8 +94,8 @@ else
                 <StatTile Label="En çok sanal kullanıcı" Value="@Fmt.Count(report.PeakVirtualUsers)" />
             }
             <StatTile Label="Tamamlanan iterasyon" Value="@Fmt.Count(report.Iterations)" Note="@(report.DroppedIterations > 0 ? $"{Fmt.Count(report.DroppedIterations)} iterasyon sınır nedeniyle atlandı" : null)" />
-            <StatTile Label="Alınan veri" Value="@Fmt.Bytes(report.BytesReceived)" />
-            <StatTile Label="Gönderilen veri" Value="@Fmt.Bytes(report.BytesSent)" />
+            <StatTile Label="Alınan veri" Value="@(trafficMeasured ? Fmt.Bytes(report.BytesReceived) : "—")" Note="@(trafficMeasured ? null : "HTTP/3'te ölçülmez")" />
+            <StatTile Label="Gönderilen veri" Value="@(trafficMeasured ? Fmt.Bytes(report.BytesSent) : "—")" Note="@(trafficMeasured ? null : "HTTP/3'te ölçülmez")" />
         </section>
 
         <section class="chart-grid">

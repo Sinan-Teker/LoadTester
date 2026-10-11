@@ -309,6 +309,11 @@ public sealed class LoadTestEngine
         }
 
         run.Metrics.RecordRequest(step.Index, ToMicroseconds(Stopwatch.GetElapsedTime(started)), status, error);
+
+        // After a failed QUIC connection .NET refuses HTTP/3 to that server for minutes, failing the user's
+        // following requests without sending them. New connections make the next request a real attempt.
+        if (run.Scenario.Settings.HttpVersion == HttpProtocolVersion.Http3)
+            user.RenewClient();
     }
 
     private static string Describe(HttpRequestException exception)
@@ -317,9 +322,12 @@ public sealed class LoadTestEngine
         {
             HttpRequestError.NameResolutionError => "Ad çözümlenemedi: " + exception.Message,
             HttpRequestError.ConnectionError => "Bağlantı kurulamadı: " + exception.Message,
-            HttpRequestError.SecureConnectionError => "TLS/SSL hatası: " + (exception.InnerException ?? exception).Message,
+            // The innermost error names the cause, e.g. no common application protocol when HTTP/2 is refused.
+            HttpRequestError.SecureConnectionError => "TLS/SSL hatası: " + exception.GetBaseException().Message,
             HttpRequestError.ResponseEnded => "Sunucu bağlantıyı kapattı",
             HttpRequestError.InvalidResponse => "Geçersiz yanıt: " + exception.Message,
+            HttpRequestError.VersionNegotiationError => "HTTP sürümü kullanılamadı: " + exception.Message,
+            HttpRequestError.HttpProtocolError => "Protokol hatası: " + exception.Message,
             _ => exception.Message,
         };
         return Shorten(message);
@@ -369,10 +377,15 @@ public sealed class LoadTestEngine
         public VirtualUser CreateUser(int id)
         {
             if (handlerFactory is not null)
-                return new VirtualUser(id, new HttpMessageInvoker(handlerFactory(), disposeHandler: true), cookies: null);
+                return new VirtualUser(id, () => new HttpMessageInvoker(handlerFactory(), disposeHandler: true), cookies: null);
 
+            var cookies = Scenario.Settings.UseCookies ? new CookieContainer() : null;
+            return new VirtualUser(id, () => new HttpMessageInvoker(CreateHandler(cookies), disposeHandler: true), cookies);
+        }
+
+        private SocketsHttpHandler CreateHandler(CookieContainer? cookies)
+        {
             var settings = Scenario.Settings;
-            var cookies = settings.UseCookies ? new CookieContainer() : null;
             var handler = new SocketsHttpHandler
             {
                 AllowAutoRedirect = settings.FollowRedirects,
@@ -386,7 +399,7 @@ public sealed class LoadTestEngine
             if (settings.IgnoreCertificateErrors)
                 handler.SslOptions.RemoteCertificateValidationCallback = static (_, _, _, _) => true;
 
-            return new VirtualUser(id, new HttpMessageInvoker(handler, disposeHandler: true), cookies);
+            return handler;
         }
 
         /// <summary>Waits for running users to finish their current step; cancels what is left after a grace period.</summary>

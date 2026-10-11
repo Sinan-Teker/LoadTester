@@ -144,6 +144,12 @@ public sealed class RequestSettings
     public bool IgnoreCertificateErrors { get; set; }
 
     /// <summary>
+    /// Protocol every request must use; a server that does not support it fails the request instead of downgrading.
+    /// Null sends requests as HTTP/1.1, the .NET default.
+    /// </summary>
+    public HttpProtocolVersion? HttpVersion { get; set; }
+
+    /// <summary>
     /// Adds a unique query parameter and no-cache headers to GET and HEAD requests,
     /// so CDNs and proxies cannot answer from their cache and the load reaches the origin.
     /// </summary>
@@ -151,6 +157,15 @@ public sealed class RequestSettings
 
     /// <summary>Name of the query parameter added when <see cref="CacheBusting"/> is on.</summary>
     public string CacheBustingParameter { get; set; } = "_cb";
+}
+
+public enum HttpProtocolVersion
+{
+    /// <summary>Negotiated through TLS (ALPN) on https; on http the server must accept HTTP/2 without upgrade (h2c).</summary>
+    Http2,
+
+    /// <summary>QUIC over UDP to the same host and port; https only, and the operating system must support QUIC.</summary>
+    Http3,
 }
 
 public sealed class StepDefinition
