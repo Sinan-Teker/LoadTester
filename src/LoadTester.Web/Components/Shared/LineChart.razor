@@ -1,0 +1,224 @@
+@using System.Globalization
+@using System.Text
+
+@*
+    Time-series line chart rendered on the server: the SVG holds the grid and the lines, HTML holds the
+    labels (so text never stretches) and a hover layer that shows a crosshair and one tooltip for all series.
+*@
+<figure class="chart">
+    <figcaption class="chart-head">
+        <span class="chart-title">@Title</span>
+        @if (Series.Count > 1)
+        {
+            <span class="chart-legend">
+                @foreach (var series in Series)
+                {
+                    <span class="legend-item"><i class="line-key" style="background:@series.Color"></i>@series.Name</span>
+                }
+            </span>
+        }
+    </figcaption>
+    <div class="chart-frame">
+        <div class="chart-plot" style="height:@(Height)px">
+            <svg class="chart-svg" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+                @foreach (var tick in _yTicks)
+                {
+                    <line class="@(tick.Value == 0 ? "chart-baseline" : "chart-gridline")" x1="0" x2="1000" y1="@Coord(tick.Top * 10)" y2="@Coord(tick.Top * 10)" />
+                }
+                @if (_areaPath is not null)
+                {
+                    <path class="chart-area" d="@_areaPath" style="fill:@Series[0].Color" />
+                }
+                @for (var i = 0; i < _linePaths.Length; i++)
+                {
+                    <path class="chart-line" d="@_linePaths[i]" style="stroke:@Series[i].Color" />
+                }
+            </svg>
+            @foreach (var tick in _yTicks)
+            {
+                <span class="chart-ytick" style="top:@Pct(tick.Top)">@tick.Label</span>
+            }
+            @foreach (var tick in _xTicks)
+            {
+                <span class="chart-xtick" style="left:@Pct(tick.Left)">@tick.Label</span>
+            }
+            @if (X.Count == 0)
+            {
+                <div class="chart-empty">@EmptyText</div>
+            }
+            else if (Hover)
+            {
+                <div class="chart-hover">
+                    @foreach (var band in _bands)
+                    {
+                        <div class="chart-band" style="left:@Pct(band.Left);width:@Pct(band.Width)">
+                            <div class="chart-crosshair" style="left:@Pct(band.Anchor)"></div>
+                            @foreach (var dot in band.Dots)
+                            {
+                                <i class="chart-dot" style="left:@Pct(band.Anchor);top:@Pct(dot.Top);background:@dot.Color"></i>
+                            }
+                            <div class="chart-tip@(band.Flip ? " flip" : "")" style="left:@Pct(band.Anchor)">
+                                <div class="chart-tip-head">@band.Label</div>
+                                @foreach (var row in band.Rows)
+                                {
+                                    <div class="chart-tip-row" style="--key:@row.Color"><strong>@row.Value</strong>@row.Name</div>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+</figure>
+
+@code {
+    private static readonly int[] TimeSteps = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400];
+
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+
+    /// <summary>Seconds since the start, ascending.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<double> X { get; set; } = [];
+
+    [Parameter, EditorRequired] public IReadOnlyList<ChartSeries> Series { get; set; } = [];
+
+    /// <summary>Right end of the time axis; the last X value is used when it is further right.</summary>
+    [Parameter] public double? XMax { get; set; }
+
+    /// <summary>Plot height in pixels, without the axis labels.</summary>
+    [Parameter] public int Height { get; set; } = 180;
+
+    [Parameter] public bool IntegerValues { get; set; }
+
+    /// <summary>Washes the area under the first series.</summary>
+    [Parameter] public bool Area { get; set; }
+
+    [Parameter] public bool Hover { get; set; } = true;
+
+    [Parameter] public Func<double, string> FormatValue { get; set; } = Fmt.Rate;
+
+    [Parameter] public string EmptyText { get; set; } = "Veri bekleniyor…";
+
+    private List<YTick> _yTicks = [];
+    private List<XTick> _xTicks = [];
+    private string[] _linePaths = [];
+    private string? _areaPath;
+    private List<Band> _bands = [];
+
+    protected override void OnParametersSet()
+    {
+        var count = X.Count;
+        var xMax = Math.Max(XMax ?? 0, count > 0 ? X[count - 1] : 0);
+        if (xMax <= 0)
+            xMax = 1;
+
+        var maxValue = 0.0;
+        foreach (var series in Series)
+        {
+            foreach (var value in series.Values)
+            {
+                if (value > maxValue)
+                    maxValue = value.Value;
+            }
+        }
+
+        var (top, step) = NiceScale(maxValue, IntegerValues);
+        double XPos(double x) => x / xMax * 100;
+        double YPos(double value) => 100 - value / top * 100;
+
+        _yTicks = [];
+        var tickCount = (int)Math.Round(top / step);
+        for (var i = 0; i <= tickCount; i++)
+            _yTicks.Add(new YTick(i * step, YPos(i * step), Fmt.Compact(i * step)));
+
+        var timeStep = TimeSteps.FirstOrDefault(s => xMax / s <= 6, TimeSteps[^1]);
+        _xTicks = [];
+        for (var t = 0; t <= xMax; t += timeStep)
+            _xTicks.Add(new XTick(XPos(t), Fmt.Clock(t)));
+
+        _linePaths = new string[Series.Count];
+        for (var s = 0; s < Series.Count; s++)
+        {
+            var values = Series[s].Values;
+            var path = new StringBuilder();
+            var penDown = false;
+            for (var i = 0; i < count && i < values.Count; i++)
+            {
+                if (values[i] is not { } value)
+                {
+                    penDown = false;
+                    continue;
+                }
+
+                path.Append(penDown ? 'L' : 'M').Append(Coord(XPos(X[i]) * 10)).Append(',').Append(Coord(YPos(value) * 10)).Append(' ');
+                penDown = true;
+            }
+
+            _linePaths[s] = path.ToString();
+        }
+
+        _areaPath = null;
+        if (Area && Series.Count > 0 && count > 1 && Series[0].Values.Count >= count && Series[0].Values.Take(count).All(v => v.HasValue))
+        {
+            var area = new StringBuilder("M").Append(Coord(XPos(X[0]) * 10)).Append(",1000 ");
+            for (var i = 0; i < count; i++)
+                area.Append('L').Append(Coord(XPos(X[i]) * 10)).Append(',').Append(Coord(YPos(Series[0].Values[i]!.Value) * 10)).Append(' ');
+            _areaPath = area.Append('L').Append(Coord(XPos(X[count - 1]) * 10)).Append(",1000 Z").ToString();
+        }
+
+        _bands = [];
+        if (!Hover)
+            return;
+
+        for (var i = 0; i < count; i++)
+        {
+            // Each band reaches halfway to its neighbours, so the pointer snaps to the nearest sample.
+            var position = XPos(X[i]);
+            var left = i == 0 ? 0 : (XPos(X[i - 1]) + position) / 2;
+            var right = i < count - 1 ? (position + XPos(X[i + 1])) / 2 : 100;
+            var width = Math.Max(0.01, right - left);
+
+            var dots = new List<Dot>();
+            var rows = new List<TipRow>();
+            foreach (var series in Series)
+            {
+                var value = i < series.Values.Count ? series.Values[i] : null;
+                rows.Add(new TipRow(series.Name, series.Color, value is { } v ? FormatValue(v) : "—"));
+                if (value is { } plotted)
+                    dots.Add(new Dot(YPos(plotted), series.Color));
+            }
+
+            _bands.Add(new Band(left, width, (position - left) / width * 100, position > 60, Fmt.Clock(X[i]), dots, rows));
+        }
+    }
+
+    /// <summary>Rounds the axis top up to a clean value split into about four steps.</summary>
+    private static (double Top, double Step) NiceScale(double max, bool integers)
+    {
+        if (max <= 0)
+            return integers ? (4, 1) : (1, 0.25);
+
+        var rough = max / 4;
+        var magnitude = Math.Pow(10, Math.Floor(Math.Log10(rough)));
+        var residual = rough / magnitude;
+        var step = (residual <= 1 ? 1 : residual <= 2 ? 2 : residual <= 2.5 ? 2.5 : residual <= 5 ? 5 : 10) * magnitude;
+        if (integers)
+            step = Math.Max(1, Math.Ceiling(step));
+
+        return (Math.Ceiling(max / step - 1e-9) * step, step);
+    }
+
+    private static string Coord(double value) => value.ToString("0.#", CultureInfo.InvariantCulture);
+
+    private static string Pct(double value) => value.ToString("0.###", CultureInfo.InvariantCulture) + "%";
+
+    private sealed record YTick(double Value, double Top, string Label);
+
+    private sealed record XTick(double Left, string Label);
+
+    private sealed record Dot(double Top, string Color);
+
+    private sealed record TipRow(string Name, string Color, string Value);
+
+    private sealed record Band(double Left, double Width, double Anchor, bool Flip, string Label, List<Dot> Dots, List<TipRow> Rows);
+}

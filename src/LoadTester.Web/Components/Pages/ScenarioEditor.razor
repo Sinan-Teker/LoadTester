@@ -1,0 +1,442 @@
+@page "/scenarios/new"
+@page "/scenarios/{Id:int}"
+@inject ScenarioStore Scenarios
+@inject RunManager Runs
+@inject NavigationManager Navigation
+
+<PageTitle>@(_loadedId is null ? "Yeni senaryo" : _savedName) · LoadTester</PageTitle>
+
+@if (_notFound)
+{
+    <div class="empty">
+        <h2>Senaryo bulunamadı</h2>
+        <p>Silinmiş olabilir.</p>
+        <a class="btn" href="scenarios">Senaryolara dön</a>
+    </div>
+}
+else if (_form is null)
+{
+    <p class="muted">Yükleniyor…</p>
+}
+else
+{
+    var form = _form;
+    var isVirtualUsers = form.Load.Mode == LoadMode.VirtualUsers;
+    var unit = Fmt.LoadUnit(form.Load.Mode);
+    var (previewX, previewSeries) = ProfilePreview();
+
+    <header class="page-head">
+        <div>
+            <a class="back" href="scenarios">← Senaryolar</a>
+            <h1>@(_loadedId is null ? "Yeni senaryo" : "Senaryoyu düzenle")</h1>
+        </div>
+    </header>
+
+    <section class="card">
+        <h2 class="card-title">Genel</h2>
+        <div class="grid grid-2">
+            <label class="field">
+                <span class="label">Ad</span>
+                <input @bind="form.Name" maxlength="200" placeholder="Ör. Ürün listeleme" />
+            </label>
+            <label class="field">
+                <span class="label">Temel URL</span>
+                <input class="mono" @bind="form.BaseUrl" placeholder="https://api.ornek.com" spellcheck="false" />
+                <span class="hint">Tam adres yazılmayan adımlarda URL bunun sonuna eklenir.</span>
+            </label>
+        </div>
+        <label class="field">
+            <span class="label">Açıklama <span class="optional">(isteğe bağlı)</span></span>
+            <textarea rows="2" @bind="form.Description"></textarea>
+        </label>
+    </section>
+
+    <section class="card">
+        <h2 class="card-title">Yük profili</h2>
+        <div class="segmented" role="group" aria-label="Yük modeli">
+            <button type="button" class="@(isVirtualUsers ? "active" : null)" aria-pressed="@(isVirtualUsers ? "true" : "false")" @onclick="() => form.Load.Mode = LoadMode.VirtualUsers">Sanal kullanıcı</button>
+            <button type="button" class="@(isVirtualUsers ? null : "active")" aria-pressed="@(isVirtualUsers ? "false" : "true")" @onclick="() => form.Load.Mode = LoadMode.ArrivalRate">Sabit hız</button>
+        </div>
+        <p class="hint mode-hint">
+            @if (isVirtualUsers)
+            {
+                <text>Her sanal kullanıcı adımları baştan sona çalıştırır ve test bitene kadar tekrarlar. Hedef, aynı anda çalışan kullanıcı sayısıdır.</text>
+            }
+            else
+            {
+                <text>Yanıt sürelerinden bağımsız olarak her saniye hedef kadar yeni iterasyon başlatılır. Tek adımlı senaryoda hedef, saniyedeki istek sayısına eşittir.</text>
+            }
+        </p>
+
+        <div class="profile">
+            <div>
+                <table class="table table-compact stages">
+                    <thead>
+                        <tr>
+                            <th>Aşama</th>
+                            <th>Süre (sn)</th>
+                            <th>Hedef (@unit)</th>
+                            <th><span class="sr-only">Sil</span></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Başlangıç</td>
+                            <td class="muted">—</td>
+                            <td><input type="number" min="0" @bind="form.Load.StartTarget" aria-label="Başlangıç hedefi" /></td>
+                            <td></td>
+                        </tr>
+                        @for (var i = 0; i < form.Load.Stages.Count; i++)
+                        {
+                            var index = i;
+                            var stage = form.Load.Stages[i];
+                            <tr @key="stage">
+                                <td>@(i + 1)</td>
+                                <td><input type="number" min="0" @bind="stage.DurationSeconds" aria-label="@($"{i + 1}. aşamanın süresi")" /></td>
+                                <td><input type="number" min="0" @bind="stage.Target" aria-label="@($"{i + 1}. aşamanın hedefi")" /></td>
+                                <td>
+                                    <button type="button" class="icon-btn danger" title="Aşamayı sil" aria-label="Aşamayı sil" disabled="@(form.Load.Stages.Count == 1)" @onclick="() => form.Load.Stages.RemoveAt(index)">✕</button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                <div class="row-actions">
+                    <button type="button" class="btn btn-sm" @onclick="AddStage">Aşama ekle</button>
+                    <span class="hint">Toplam süre: <strong>@Fmt.Duration(form.Load.TotalSeconds)</strong></span>
+                </div>
+                <p class="hint">Her aşama, hedefe önceki değerden doğrusal olarak ulaşır. Süresi 0 olan aşama anında geçiş yapar.</p>
+                @if (!isVirtualUsers)
+                {
+                    <label class="field narrow">
+                        <span class="label">Eş zamanlı kullanıcı sınırı</span>
+                        <input type="number" min="1" @bind="form.Load.MaxVirtualUsers" />
+                        <span class="hint">Sınır dolduğunda yeni iterasyonlar başlatılmaz ve raporda atlanan olarak gösterilir.</span>
+                    </label>
+                }
+            </div>
+            <div class="profile-chart">
+                <LineChart Title="@($"Önizleme ({unit})")" X="previewX" Series="previewSeries" XMax="form.Load.TotalSeconds" Hover="false" Area IntegerValues Height="150" />
+            </div>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2 class="card-title">Değişkenler ve ortak başlıklar</h2>
+        <div class="grid grid-2">
+            <label class="field">
+                <span class="label">Değişkenler</span>
+                <textarea class="mono" rows="4" @bind="form.VariablesText" spellcheck="false" placeholder="@VariablesPlaceholder"></textarea>
+                <span class="hint">Her satıra bir tane, <code>ad=değer</code> biçiminde. Kullanım: <code>{{ad}}</code>. Her iterasyon başında yeniden hesaplanır.</span>
+            </label>
+            <label class="field">
+                <span class="label">Ortak başlıklar</span>
+                <textarea class="mono" rows="4" @bind="form.HeadersText" spellcheck="false" placeholder="Accept: application/json"></textarea>
+                <span class="hint">Tüm adımlara eklenir; adımda aynı adlı başlık varsa o kullanılır.</span>
+            </label>
+        </div>
+        <p class="hint no-margin">
+            Hazır ifadeler: <code>{{$guid}}</code> <code>{{$timestamp}}</code> <code>{{$randomInt(1,100)}}</code> <code>{{$vu}}</code> (kullanıcı no) <code>{{$iteration}}</code> (iterasyon no)
+        </p>
+    </section>
+
+    <section class="card">
+        <div class="card-head">
+            <h2 class="card-title">Adımlar</h2>
+            <span class="hint">Her iterasyonda yukarıdan aşağıya sırayla çalışır.</span>
+        </div>
+
+        @for (var i = 0; i < form.Steps.Count; i++)
+        {
+            var index = i;
+            var step = form.Steps[i];
+            <div class="step" @key="step">
+                <div class="step-head">
+                    <span class="step-no">@(i + 1)</span>
+                    <input class="step-name" @bind="step.Name" placeholder="Adım adı (isteğe bağlı)" aria-label="@($"{i + 1}. adımın adı")" />
+                    <div class="step-tools">
+                        <button type="button" class="icon-btn" title="Yukarı taşı" aria-label="Yukarı taşı" disabled="@(i == 0)" @onclick="() => MoveStep(index, -1)">↑</button>
+                        <button type="button" class="icon-btn" title="Aşağı taşı" aria-label="Aşağı taşı" disabled="@(i == form.Steps.Count - 1)" @onclick="() => MoveStep(index, 1)">↓</button>
+                        <button type="button" class="icon-btn danger" title="Adımı sil" aria-label="Adımı sil" disabled="@(form.Steps.Count == 1)" @onclick="() => form.Steps.RemoveAt(index)">✕</button>
+                    </div>
+                </div>
+
+                <div class="request-line">
+                    <select @bind="step.Method" aria-label="HTTP metodu">
+                        @foreach (var method in Methods)
+                        {
+                            <option value="@method">@method</option>
+                        }
+                    </select>
+                    <input class="mono" @bind="step.Url" placeholder="/api/urunler veya https://ornek.com/api/urunler" spellcheck="false" aria-label="URL" />
+                </div>
+
+                <div class="grid grid-2">
+                    <label class="field">
+                        <span class="label">Başlıklar</span>
+                        <textarea class="mono" rows="3" @bind="step.HeadersText" spellcheck="false" placeholder="Authorization: Bearer {{token}}"></textarea>
+                    </label>
+                    <label class="field">
+                        <span class="label">Gövde</span>
+                        <textarea class="mono" rows="3" @bind="step.Body" spellcheck="false" placeholder="@BodyPlaceholder"></textarea>
+                        <span class="hint">Content-Type verilmezse { veya [ ile başlayan gövde JSON olarak gönderilir.</span>
+                    </label>
+                </div>
+
+                <div class="grid grid-2">
+                    <label class="field">
+                        <span class="label">Beklenen durum kodu</span>
+                        <input @bind="step.ExpectedStatus" placeholder="200-399" />
+                        <span class="hint">Ör. 200 · 200-299 · 2xx · 200,302. Boş bırakılırsa her kod kabul edilir.</span>
+                    </label>
+                    <label class="field">
+                        <span class="label">Yanıtta aranacak metin <span class="optional">(isteğe bağlı)</span></span>
+                        <input @bind="step.ExpectedBodyText" />
+                        <span class="hint">Yanıt bu metni içermezse istek başarısız sayılır.</span>
+                    </label>
+                </div>
+
+                <div class="extractors">
+                    <div class="sub-head">
+                        Değişken çıkarma
+                        <span class="hint">Yanıttaki bir değeri sonraki adımlarda <code>{{ad}}</code> olarak kullanın.</span>
+                    </div>
+                    @for (var j = 0; j < step.Extractors.Count; j++)
+                    {
+                        var extractorIndex = j;
+                        var extractor = step.Extractors[j];
+                        <div class="extractor" @key="extractor">
+                            <input class="mono" @bind="extractor.Variable" placeholder="token" spellcheck="false" aria-label="Değişken adı" />
+                            <select @bind="extractor.Source" aria-label="Kaynak">
+                                <option value="@ExtractorSource.JsonPath">JSON yolu</option>
+                                <option value="@ExtractorSource.Regex">Düzenli ifade</option>
+                                <option value="@ExtractorSource.Header">Yanıt başlığı</option>
+                            </select>
+                            <input class="mono" @bind="extractor.Expression" placeholder="@ExpressionPlaceholder(extractor.Source)" spellcheck="false" aria-label="İfade" />
+                            <button type="button" class="icon-btn danger" title="Kaldır" aria-label="Kaldır" @onclick="() => step.Extractors.RemoveAt(extractorIndex)">✕</button>
+                        </div>
+                    }
+                    <button type="button" class="btn btn-sm" @onclick="() => step.Extractors.Add(new Extractor())">Değişken ekle</button>
+                </div>
+            </div>
+        }
+
+        <button type="button" class="btn" @onclick="AddStep">Adım ekle</button>
+    </section>
+
+    <section class="card">
+        <h2 class="card-title">İstek ayarları</h2>
+        <div class="grid grid-3">
+            <label class="field">
+                <span class="label">Zaman aşımı (sn)</span>
+                <input type="number" min="1" max="600" @bind="form.Settings.TimeoutSeconds" />
+            </label>
+            <label class="field">
+                <span class="label">Adımdan sonra bekleme, en az (ms)</span>
+                <input type="number" min="0" @bind="form.Settings.ThinkTimeMinMs" />
+            </label>
+            <label class="field">
+                <span class="label">Adımdan sonra bekleme, en çok (ms)</span>
+                <input type="number" min="0" @bind="form.Settings.ThinkTimeMaxMs" />
+            </label>
+        </div>
+        <div class="checks">
+            <label class="check"><input type="checkbox" @bind="form.Settings.FollowRedirects" /> Yönlendirmeleri takip et</label>
+            <label class="check"><input type="checkbox" @bind="form.Settings.UseCookies" /> Çerezleri sakla <span class="hint">(her iterasyonda sıfırlanır)</span></label>
+            <label class="check"><input type="checkbox" @bind="form.Settings.IgnoreCertificateErrors" /> Sertifika hatalarını yok say</label>
+            <label class="check"><input type="checkbox" @bind="form.Settings.CacheBusting" /> Önbelleği atla (cache-busting)</label>
+        </div>
+        @if (form.Settings.CacheBusting)
+        {
+            <div class="sub-options">
+                <label class="field narrow">
+                    <span class="label">Sorgu parametresi</span>
+                    <input class="mono" @bind="form.Settings.CacheBustingParameter" spellcheck="false" aria-label="Önbellek atlama parametresi" />
+                </label>
+                <p class="hint">
+                    GET ve HEAD isteklerinin adresine her seferinde farklı bir değer eklenir
+                    (<code>?@(form.Settings.CacheBustingParameter.Trim())=…</code>) ve <code>Cache-Control: no-cache</code>, <code>Pragma: no-cache</code>
+                    başlıkları gönderilir. Böylece CDN ve ara sunucu önbellekleri atlanır, yük doğrudan sunucuya ulaşır.
+                    Bu adlarda bir başlığı kendiniz tanımladıysanız sizinki kullanılır.
+                </p>
+            </div>
+        }
+    </section>
+
+    <div class="form-footer">
+        @if (_errors.Count > 0)
+        {
+            <div class="alert alert-error" role="alert">
+                <strong>Kaydetmeden önce düzeltilmesi gerekenler</strong>
+                <ul>
+                    @foreach (var error in _errors)
+                    {
+                        <li>@error</li>
+                    }
+                </ul>
+            </div>
+        }
+        <StartErrors Result="_start" />
+        <div class="footer-actions">
+            @if (_savedAt is not null)
+            {
+                <span class="saved">Kaydedildi · @_savedAt</span>
+            }
+            <a class="btn" href="scenarios">Vazgeç</a>
+            <button type="button" class="btn" disabled="@_busy" @onclick="SaveAsync">Kaydet</button>
+            <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="SaveAndRunAsync">Kaydet ve başlat</button>
+        </div>
+    </div>
+}
+
+@code {
+    private static readonly string[] Methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
+
+    // Attribute values are set verbatim, so markup entities like &quot; would show up literally.
+    private const string VariablesPlaceholder = "kullanici=test@ornek.com\nurunId={{$randomInt(1,500)}}";
+    private const string BodyPlaceholder = "{\"kullanici\": \"{{kullanici}}\"}";
+
+    [Parameter] public int? Id { get; set; }
+
+    private ScenarioForm? _form;
+    private int? _loadedId; // scenario held by the form; null while a new one is unsaved
+    private string _savedName = "";
+    private bool _notFound;
+    private List<string> _errors = [];
+    private StartRunResult? _start;
+    private string? _savedAt;
+    private bool _busy;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // After the first save of a new scenario the URL changes to its id; keep the form as it is.
+        if (_form is not null && Id is not null && Id == _loadedId)
+            return;
+
+        _errors = [];
+        _start = null;
+        _savedAt = null;
+        _notFound = false;
+
+        if (Id is null)
+        {
+            _loadedId = null;
+            _form = ScenarioForm.From("", null, ScenarioDefinition.CreateDefault());
+            return;
+        }
+
+        var entity = await Scenarios.FindAsync(Id.Value);
+        if (entity is null)
+        {
+            _notFound = true;
+            _form = null;
+            return;
+        }
+
+        _loadedId = entity.Id;
+        _savedName = entity.Name;
+        _form = ScenarioForm.From(entity.Name, entity.Description, ScenarioStore.ParseDefinition(entity.DefinitionJson));
+    }
+
+    private (double[] X, ChartSeries[] Series) ProfilePreview()
+    {
+        var load = _form!.Load;
+        var x = new List<double> { 0 };
+        var y = new List<double?> { Math.Max(0, load.StartTarget) };
+        var time = 0.0;
+        foreach (var stage in load.Stages)
+        {
+            time += Math.Max(0, stage.DurationSeconds);
+            x.Add(time);
+            y.Add(Math.Max(0, stage.Target));
+        }
+
+        return ([.. x], [new ChartSeries("Hedef", ChartColors.Series1, y)]);
+    }
+
+    private void AddStage()
+    {
+        var stages = _form!.Load.Stages;
+        stages.Add(new LoadStage(30, stages.Count > 0 ? stages[^1].Target : 10));
+    }
+
+    private void AddStep() => _form!.Steps.Add(new StepForm());
+
+    private void MoveStep(int index, int offset)
+    {
+        var steps = _form!.Steps;
+        (steps[index], steps[index + offset]) = (steps[index + offset], steps[index]);
+    }
+
+    private static string ExpressionPlaceholder(ExtractorSource source) => source switch
+    {
+        ExtractorSource.JsonPath => "$.data.token",
+        ExtractorSource.Regex => "\"id\":\\s*(\\d+)",
+        _ => "X-Request-Id",
+    };
+
+    private async Task SaveAsync() => await SaveCoreAsync();
+
+    private async Task SaveAndRunAsync()
+    {
+        if (await SaveCoreAsync() is not { } id)
+            return;
+
+        _busy = true;
+        try
+        {
+            var result = await Runs.StartRunAsync(id);
+            if (result.Errors.Count == 0)
+                Navigation.NavigateTo($"runs/{result.RunId}");
+            else
+                _start = result;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <returns>The scenario id, or null when validation failed.</returns>
+    private async Task<int?> SaveCoreAsync()
+    {
+        var form = _form!;
+        _start = null;
+        _savedAt = null;
+
+        var errors = new List<string>();
+        if (string.IsNullOrWhiteSpace(form.Name))
+            errors.Add("Senaryo adı boş olamaz.");
+        var definition = form.ToDefinition(errors);
+        errors.AddRange(ScenarioValidator.Validate(definition));
+        _errors = errors.Distinct().ToList();
+        if (_errors.Count > 0)
+            return null;
+
+        _busy = true;
+        try
+        {
+            var name = form.Name.Trim();
+            var description = string.IsNullOrWhiteSpace(form.Description) ? null : form.Description.Trim();
+            var id = await Scenarios.SaveAsync(_loadedId, name, description, definition);
+            _savedName = name;
+            _savedAt = DateTime.Now.ToString("HH:mm:ss");
+            if (_loadedId is null)
+            {
+                _loadedId = id;
+                Navigation.NavigateTo($"scenarios/{id}", replace: true);
+            }
+
+            return id;
+        }
+        catch (InvalidOperationException ex)
+        {
+            _errors = [ex.Message];
+            return null;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

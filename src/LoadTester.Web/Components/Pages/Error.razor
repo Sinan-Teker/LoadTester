@@ -1,0 +1,25 @@
+@page "/Error"
+@using System.Diagnostics
+
+<PageTitle>Hata · LoadTester</PageTitle>
+
+<div class="empty">
+    <h2>Bir hata oluştu</h2>
+    <p>İstek işlenirken beklenmeyen bir hata oluştu.</p>
+    @if (ShowRequestId)
+    {
+        <p class="muted">İstek kimliği: <code>@RequestId</code></p>
+    }
+    <a class="btn" href="scenarios">Senaryolara dön</a>
+</div>
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    private string? RequestId { get; set; }
+    private bool ShowRequestId => !string.IsNullOrEmpty(RequestId);
+
+    protected override void OnInitialized() =>
+        RequestId = Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+}

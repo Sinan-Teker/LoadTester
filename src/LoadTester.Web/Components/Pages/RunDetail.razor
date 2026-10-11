@@ -1,0 +1,355 @@
+@page "/runs/{Id:int}"
+@implements IDisposable
+@inject RunManager Manager
+@inject RunStore Store
+@inject NavigationManager Navigation
+
+<PageTitle>@(_name ?? "Test") · LoadTester</PageTitle>
+
+@if (_notFound)
+{
+    <div class="empty">
+        <h2>Test bulunamadı</h2>
+        <p>Kayıt silinmiş olabilir.</p>
+        <a class="btn" href="runs">Test geçmişine dön</a>
+    </div>
+}
+else if (_name is null)
+{
+    <p class="muted">Yükleniyor…</p>
+}
+else
+{
+    <header class="page-head">
+        <div>
+            <a class="back" href="runs">← Test geçmişi</a>
+            <h1>@_name <StatusBadge Status="_status" /></h1>
+            <p class="page-sub">
+                #@Id · @Fmt.Timestamp(_startedAt) · @Fmt.LoadSummary(_definition.Load)@(_definition.Settings.CacheBusting ? " · önbellek atlama açık" : "")
+            </p>
+        </div>
+        <div class="head-actions">
+            @if (_live is not null)
+            {
+                <button type="button" class="btn btn-danger" disabled="@_live.StopRequested" @onclick="StopAsync">
+                    @(_live.StopRequested ? "Durduruluyor…" : "Testi durdur")
+                </button>
+            }
+            else
+            {
+                <a class="btn" href="scenarios/@_scenarioId">Senaryoyu düzenle</a>
+                <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="RunAgainAsync">Yeniden çalıştır</button>
+            }
+        </div>
+    </header>
+
+    <StartErrors Result="_start" />
+
+    @if (_runError is not null)
+    {
+        <div class="alert alert-error" role="alert">
+            <strong>Test bir hata nedeniyle sonlandı</strong>
+            <p>@_runError</p>
+        </div>
+    }
+
+    @if (_live is not null)
+    {
+        var planned = Math.Max(1, _definition.Load.TotalSeconds);
+        var elapsed = _report?.ElapsedSeconds ?? 0;
+        <div class="progress-row">
+            <div class="progress" role="progressbar" aria-label="Test ilerlemesi" aria-valuemin="0" aria-valuemax="@planned" aria-valuenow="@((int)Math.Min(elapsed, planned))">
+                <div class="progress-fill" style="width:@((Math.Min(1, elapsed / planned) * 100).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture))%"></div>
+            </div>
+            <span class="progress-text">
+                @Fmt.Clock(elapsed) / @Fmt.Clock(planned)@(elapsed >= planned ? " · son istekler tamamlanıyor" : "")
+            </span>
+        </div>
+    }
+
+    @if (_report is null)
+    {
+        <div class="card">
+            <p class="muted no-margin">@(_live is not null ? "İlk sonuçlar bekleniyor…" : "Bu test için kaydedilmiş sonuç yok.")</p>
+        </div>
+    }
+    else
+    {
+        var report = _report;
+        <section class="stats" aria-label="Özet">
+            <StatTile Label="Toplam istek" Value="@Fmt.Count(report.Requests)" />
+            <StatTile Label="İstek/sn" Value="@Fmt.Rate(report.RequestsPerSecond)" Note="ortalama" />
+            <StatTile Label="Hata oranı" Value="@Fmt.Percent(report.FailureRate)" Note="@($"{Fmt.Count(report.Failures)} başarısız istek")" />
+            <StatTile Label="Ortalama süre" Value="@Fmt.Ms(report.Latency?.MeanMs)" />
+            <StatTile Label="p95 süre" Value="@Fmt.Ms(report.Latency?.P95Ms)" />
+            <StatTile Label="p99 süre" Value="@Fmt.Ms(report.Latency?.P99Ms)" />
+            @if (_live is not null)
+            {
+                <StatTile Label="Sanal kullanıcı" Value="@Fmt.Count(report.ActiveVirtualUsers)" Note="@($"en çok {Fmt.Count(report.PeakVirtualUsers)}")" />
+            }
+            else
+            {
+                <StatTile Label="En çok sanal kullanıcı" Value="@Fmt.Count(report.PeakVirtualUsers)" />
+            }
+            <StatTile Label="Tamamlanan iterasyon" Value="@Fmt.Count(report.Iterations)" Note="@(report.DroppedIterations > 0 ? $"{Fmt.Count(report.DroppedIterations)} iterasyon sınır nedeniyle atlandı" : null)" />
+            <StatTile Label="Alınan veri" Value="@Fmt.Bytes(report.BytesReceived)" />
+            <StatTile Label="Gönderilen veri" Value="@Fmt.Bytes(report.BytesSent)" />
+        </section>
+
+        <section class="chart-grid">
+            <div class="card">
+                <LineChart Title="İstek/sn" X="_chartX" Series="_throughput" XMax="_xMax" />
+            </div>
+            <div class="card">
+                <LineChart Title="Yanıt süresi (ms)" X="_chartX" Series="_latency" XMax="_xMax" FormatValue="FormatMs" />
+            </div>
+            <div class="card">
+                <LineChart Title="Sanal kullanıcı" X="_chartX" Series="_users" XMax="_xMax" IntegerValues Area FormatValue="FormatUsers" />
+            </div>
+        </section>
+
+        <section class="card card-flush">
+            <h2 class="card-title">Adımlar</h2>
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Adım</th>
+                            <th class="num">İstek</th>
+                            <th class="num">Hata oranı</th>
+                            <th class="num">Ortalama</th>
+                            <th class="num">Min</th>
+                            <th class="num">p50</th>
+                            <th class="num">p90</th>
+                            <th class="num">p95</th>
+                            <th class="num">p99</th>
+                            <th class="num">Maks</th>
+                            <th>Durum kodları</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var step in report.Steps)
+                        {
+                            <tr>
+                                <td>
+                                    <div class="row-title">@StepName(step.Index)</div>
+                                    <div class="row-sub mono-sub"><span class="method">@step.Method</span> @step.Url</div>
+                                </td>
+                                <td class="num">@Fmt.Count(step.Requests)</td>
+                                <td class="num">@Fmt.Percent(step.FailureRate)</td>
+                                <td class="num">@Fmt.Ms(step.Latency?.MeanMs)</td>
+                                <td class="num">@Fmt.Ms(step.Latency?.MinMs)</td>
+                                <td class="num">@Fmt.Ms(step.Latency?.P50Ms)</td>
+                                <td class="num">@Fmt.Ms(step.Latency?.P90Ms)</td>
+                                <td class="num">@Fmt.Ms(step.Latency?.P95Ms)</td>
+                                <td class="num">@Fmt.Ms(step.Latency?.P99Ms)</td>
+                                <td class="num">@Fmt.Ms(step.Latency?.MaxMs)</td>
+                                <td>
+                                    <div class="codes">
+                                        @foreach (var status in step.StatusCodes)
+                                        {
+                                            <span class="code code-@(status.Code / 100)xx">@status.Code <span class="muted">× @Fmt.Count(status.Count)</span></span>
+                                        }
+                                        @if (step.StatusCodes.Count == 0)
+                                        {
+                                            <span class="muted">—</span>
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        @if (report.Errors.Count > 0)
+        {
+            <section class="card card-flush">
+                <h2 class="card-title">Hatalar</h2>
+                <div class="table-wrap">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th class="shrink">Adım</th>
+                                <th>Neden</th>
+                                <th class="num shrink">Adet</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var error in report.Errors)
+                            {
+                                <tr>
+                                    <td class="nowrap">@(error.StepIndex < 0 ? "Motor" : StepName(error.StepIndex))</td>
+                                    <td class="error-text">@error.Message</td>
+                                    <td class="num">@Fmt.Count(error.Count)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        }
+    }
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private ActiveRun? _live;
+    private bool _notFound;
+    private string? _name;
+    private int _scenarioId;
+    private RunStatus _status;
+    private DateTime _startedAt;
+    private ScenarioDefinition _definition = new();
+    private RunReport? _report;
+    private string? _runError;
+    private StartRunResult? _start;
+    private bool _busy;
+
+    private double[] _chartX = [];
+    private double _xMax;
+    private ChartSeries[] _throughput = [];
+    private ChartSeries[] _latency = [];
+    private ChartSeries[] _users = [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        Detach();
+        _start = null;
+        _live = Manager.Get(Id);
+        if (_live is null)
+        {
+            await LoadSavedAsync();
+            return;
+        }
+
+        _live.Changed += OnLiveChanged;
+        if (_live.IsFinished)
+            await LoadSavedAsync(); // finished between the lookup and the subscription
+        else
+            ShowLive(_live);
+    }
+
+    private void ShowLive(ActiveRun run)
+    {
+        _notFound = false;
+        _name = run.ScenarioName;
+        _scenarioId = run.ScenarioId;
+        _status = RunStatus.Running;
+        _startedAt = run.StartedAt;
+        _definition = run.Definition;
+        _report = run.Report;
+        _runError = null;
+        BuildCharts(run.Timeline, run.Definition.Load.TotalSeconds);
+    }
+
+    private async Task LoadSavedAsync()
+    {
+        Detach();
+        _live = null;
+        var details = await Store.GetAsync(Id);
+        if (details is null)
+        {
+            _notFound = true;
+            _name = null;
+            return;
+        }
+
+        var run = details.Run;
+        _notFound = false;
+        _name = run.ScenarioName;
+        _scenarioId = run.ScenarioId;
+        _status = run.Status;
+        _startedAt = run.StartedAt;
+        _definition = details.Definition;
+        _report = details.Report;
+        _runError = run.Error;
+        BuildCharts(details.Timeline, 0);
+    }
+
+    private void OnLiveChanged() => _ = InvokeAsync(async () =>
+    {
+        if (_live is null)
+            return;
+
+        if (_live.IsFinished)
+            await LoadSavedAsync();
+        else
+            ShowLive(_live);
+
+        StateHasChanged();
+    });
+
+    private void BuildCharts(IReadOnlyList<TimePoint> timeline, double plannedSeconds)
+    {
+        var (x, values) = ChartData.FromTimeline(timeline,
+        [
+            p => p.RequestsPerSecond,
+            p => p.FailuresPerSecond,
+            p => p.P50Ms,
+            p => p.P95Ms,
+            p => p.P99Ms,
+            p => p.VirtualUsers,
+        ]);
+
+        _chartX = x;
+        _xMax = Math.Max(plannedSeconds, x.Length > 0 ? x[^1] : 0);
+        _throughput =
+        [
+            new ChartSeries("İstek/sn", ChartColors.Series1, values[0]),
+            new ChartSeries("Hata/sn", ChartColors.Series2, values[1]),
+        ];
+        _latency =
+        [
+            new ChartSeries("p50", ChartColors.P50, values[2]),
+            new ChartSeries("p95", ChartColors.P95, values[3]),
+            new ChartSeries("p99", ChartColors.P99, values[4]),
+        ];
+        _users = [new ChartSeries("Sanal kullanıcı", ChartColors.Series1, values[5])];
+    }
+
+    private string StepName(int index)
+    {
+        var steps = _definition.Steps;
+        var name = index < steps.Count ? steps[index].Name : "";
+        return string.IsNullOrWhiteSpace(name) ? $"Adım {index + 1}" : $"{index + 1}. {name}";
+    }
+
+    private static string FormatMs(double value) => Fmt.Ms(value);
+
+    private static string FormatUsers(double value) => Fmt.Count((long)Math.Round(value));
+
+    private async Task StopAsync()
+    {
+        if (_live is not null)
+            await _live.StopAsync();
+    }
+
+    private async Task RunAgainAsync()
+    {
+        _busy = true;
+        _start = null;
+        try
+        {
+            var result = await Manager.StartRunAsync(_scenarioId);
+            if (result.Errors.Count == 0)
+                Navigation.NavigateTo($"runs/{result.RunId}");
+            else
+                _start = result;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void Detach()
+    {
+        if (_live is not null)
+            _live.Changed -= OnLiveChanged;
+    }
+
+    public void Dispose() => Detach();
+}

@@ -1,0 +1,23 @@
+@inherits LayoutComponentBase
+
+<div class="shell">
+    <aside class="sidebar">
+        <a class="brand" href="scenarios">
+            <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l5-6 4 3 6-8 3 4" /></svg>
+            <span>LoadTester</span>
+        </a>
+        <nav class="nav" aria-label="Ana menü">
+            <NavLink class="nav-link" href="scenarios">Senaryolar</NavLink>
+            <NavLink class="nav-link" href="runs">Test geçmişi</NavLink>
+        </nav>
+    </aside>
+    <main class="content">
+        @Body
+    </main>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    Beklenmeyen bir hata oluştu.
+    <a href="." class="reload">Sayfayı yenile</a>
+    <span class="dismiss" aria-label="Kapat">✕</span>
+</div>

@@ -1,0 +1,5 @@
+<span class="status status-@Status.ToString().ToLowerInvariant()"><i aria-hidden="true"></i>@Fmt.StatusLabel(Status)</span>
+
+@code {
+    [Parameter, EditorRequired] public RunStatus Status { get; set; }
+}

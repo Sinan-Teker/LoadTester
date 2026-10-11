@@ -1,0 +1,20 @@
+@if (Result is { Errors.Count: > 0 } result)
+{
+    <div class="alert alert-error" role="alert">
+        <strong>Test başlatılamadı</strong>
+        <ul>
+            @foreach (var error in result.Errors)
+            {
+                <li>@error</li>
+            }
+        </ul>
+        @if (result.RunId is { } runId)
+        {
+            <p><a href="runs/@runId">Çalışan testi izle →</a></p>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public StartRunResult? Result { get; set; }
+}

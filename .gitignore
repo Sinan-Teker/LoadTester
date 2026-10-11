@@ -1,0 +1,9 @@
+bin/
+obj/
+.vs/
+*.user
+*.suo
+TestResults/
+
+# Local SQLite database with scenarios and run results
+App_Data/

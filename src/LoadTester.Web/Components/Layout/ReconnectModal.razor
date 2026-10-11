@@ -1,0 +1,31 @@
+<script type="module" src="@Assets["Components/Layout/ReconnectModal.razor.js"]"></script>
+
+<dialog id="components-reconnect-modal" data-nosnippet>
+    <div class="components-reconnect-container">
+        <div class="components-rejoining-animation" aria-hidden="true">
+            <div></div>
+            <div></div>
+        </div>
+        <p class="components-reconnect-first-attempt-visible">
+            Sunucuya yeniden bağlanılıyor…
+        </p>
+        <p class="components-reconnect-repeated-attempt-visible">
+            Bağlanılamadı; <span id="components-seconds-to-next-attempt"></span> saniye sonra yeniden denenecek.
+        </p>
+        <p class="components-reconnect-failed-visible">
+            Sunucuya bağlanılamadı.<br />Tekrar deneyin ya da sayfayı yenileyin.
+        </p>
+        <button id="components-reconnect-button" class="components-reconnect-failed-visible">
+            Tekrar dene
+        </button>
+        <p class="components-pause-visible">
+            Oturum sunucu tarafından duraklatıldı.
+        </p>
+        <p class="components-resume-failed-visible">
+            Oturum sürdürülemedi.<br />Tekrar deneyin ya da sayfayı yenileyin.
+        </p>
+        <button id="components-resume-button" class="components-pause-visible components-resume-failed-visible">
+            Sürdür
+        </button>
+    </div>
+</dialog>

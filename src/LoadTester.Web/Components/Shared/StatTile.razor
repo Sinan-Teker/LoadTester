@@ -1,0 +1,14 @@
+<div class="stat">
+    <div class="stat-label">@Label</div>
+    <div class="stat-value">@Value</div>
+    @if (!string.IsNullOrEmpty(Note))
+    {
+        <div class="stat-note">@Note</div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = "";
+    [Parameter, EditorRequired] public string Value { get; set; } = "";
+    [Parameter] public string? Note { get; set; }
+}

@@ -1,0 +1,123 @@
+@page "/runs"
+@implements IDisposable
+@inject RunStore Store
+@inject RunManager Manager
+
+<PageTitle>Test geçmişi · LoadTester</PageTitle>
+
+<header class="page-head">
+    <div>
+        <h1>Test geçmişi</h1>
+        <p class="page-sub">Çalıştırılan testler ve özet sonuçları (en yeni 200 kayıt).</p>
+    </div>
+</header>
+
+@if (_runs is null)
+{
+    <p class="muted">Yükleniyor…</p>
+}
+else if (_runs.Count == 0)
+{
+    <div class="empty">
+        <h2>Henüz test çalıştırılmadı</h2>
+        <p>Senaryolar sayfasından bir senaryoyu başlattığınızda sonuçlar burada listelenir.</p>
+        <a class="btn btn-primary" href="scenarios">Senaryolara git</a>
+    </div>
+}
+else
+{
+    <div class="card card-flush">
+        <div class="table-wrap">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th class="num">#</th>
+                        <th>Senaryo</th>
+                        <th>Durum</th>
+                        <th>Başlangıç</th>
+                        <th class="num">Süre</th>
+                        <th class="num">En çok kullanıcı</th>
+                        <th class="num">İstek</th>
+                        <th class="num">İstek/sn</th>
+                        <th class="num">Hata oranı</th>
+                        <th class="num">p95</th>
+                        <th><span class="sr-only">İşlemler</span></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var run in _runs)
+                    {
+                        var running = run.Status == RunStatus.Running;
+                        <tr @key="run.Id">
+                            <td class="num muted">@run.Id</td>
+                            <td><a class="row-title" href="runs/@run.Id">@run.ScenarioName</a></td>
+                            <td><StatusBadge Status="run.Status" /></td>
+                            <td class="nowrap">@Fmt.Timestamp(run.StartedAt)</td>
+                            @if (running)
+                            {
+                                <td class="muted" colspan="6">Sonuçlar test bitince burada görünür.</td>
+                            }
+                            else if (run.Status is RunStatus.Interrupted or RunStatus.Failed)
+                            {
+                                <td class="muted" colspan="6">Sonuç kaydedilmedi.</td>
+                            }
+                            else
+                            {
+                                <td class="num">@Fmt.Duration(run.DurationSeconds)</td>
+                                <td class="num">@Fmt.Count(run.PeakVirtualUsers)</td>
+                                <td class="num">@Fmt.Count(run.TotalRequests)</td>
+                                <td class="num">@Fmt.Rate(run.RequestsPerSecond)</td>
+                                <td class="num">@Fmt.Percent(run.TotalRequests > 0 ? (double)run.FailedRequests / run.TotalRequests : 0)</td>
+                                <td class="num">@Fmt.Ms(run.P95Ms)</td>
+                            }
+                            <td>
+                                <div class="actions">
+                                    @if (running)
+                                    {
+                                        <a class="btn btn-sm btn-primary" href="runs/@run.Id">İzle</a>
+                                    }
+                                    else if (_confirmDelete == run.Id)
+                                    {
+                                        <span class="confirm">Silinsin mi?</span>
+                                        <button type="button" class="btn btn-sm btn-danger" @onclick="() => DeleteAsync(run.Id)">Sil</button>
+                                        <button type="button" class="btn btn-sm" @onclick="() => _confirmDelete = null">Vazgeç</button>
+                                    }
+                                    else
+                                    {
+                                        <button type="button" class="btn btn-sm btn-ghost-danger" @onclick="() => _confirmDelete = run.Id">Sil</button>
+                                    }
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    private List<RunSummary>? _runs;
+    private int? _confirmDelete;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Manager.RunsChanged += OnRunsChanged;
+        _runs = await Store.ListAsync();
+    }
+
+    private void OnRunsChanged() => _ = InvokeAsync(async () =>
+    {
+        _runs = await Store.ListAsync();
+        StateHasChanged();
+    });
+
+    private async Task DeleteAsync(int id)
+    {
+        _confirmDelete = null;
+        await Store.DeleteAsync(id);
+        _runs = await Store.ListAsync();
+    }
+
+    public void Dispose() => Manager.RunsChanged -= OnRunsChanged;
+}

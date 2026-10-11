@@ -1,0 +1,165 @@
+@page "/scenarios"
+@implements IDisposable
+@inject ScenarioStore Store
+@inject RunManager Runs
+@inject NavigationManager Navigation
+
+<PageTitle>Senaryolar · LoadTester</PageTitle>
+
+<header class="page-head">
+    <div>
+        <h1>Senaryolar</h1>
+        <p class="page-sub">Yük testi senaryolarını oluşturun, düzenleyin ve çalıştırın.</p>
+    </div>
+    <a class="btn btn-primary" href="scenarios/new">Yeni senaryo</a>
+</header>
+
+<StartErrors Result="_start" />
+
+@if (_items is null)
+{
+    <p class="muted">Yükleniyor…</p>
+}
+else if (_items.Count == 0)
+{
+    <div class="empty">
+        <h2>Henüz senaryo yok</h2>
+        <p>İlk senaryonuzu oluşturup test edeceğiniz sisteme yük göndermeye başlayın.</p>
+        <a class="btn btn-primary" href="scenarios/new">Senaryo oluştur</a>
+    </div>
+}
+else
+{
+    <div class="card card-flush">
+        <div class="table-wrap">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Senaryo</th>
+                        <th class="num">Adım</th>
+                        <th>Yük profili</th>
+                        <th>Son çalıştırma</th>
+                        <th><span class="sr-only">İşlemler</span></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in _items)
+                    {
+                        var running = Runs.FindByScenario(item.Id);
+                        <tr @key="item.Id">
+                            <td>
+                                <a class="row-title" href="scenarios/@item.Id">@item.Name</a>
+                                @if (!string.IsNullOrWhiteSpace(item.Description))
+                                {
+                                    <div class="row-sub">@item.Description</div>
+                                }
+                            </td>
+                            <td class="num">@item.Definition.Steps.Count</td>
+                            <td class="nowrap">@Fmt.LoadSummary(item.Definition.Load)</td>
+                            <td class="nowrap">
+                                @if (running is not null)
+                                {
+                                    <a class="plain-link" href="runs/@running.RunId"><StatusBadge Status="RunStatus.Running" /></a>
+                                }
+                                else if (item.LastRun is { } last)
+                                {
+                                    <a class="plain-link" href="runs/@last.Id"><StatusBadge Status="last.Status" /> <span class="muted">@Fmt.Timestamp(last.StartedAt)</span></a>
+                                }
+                                else
+                                {
+                                    <span class="muted">—</span>
+                                }
+                            </td>
+                            <td>
+                                <div class="actions">
+                                    @if (_confirmDelete == item.Id)
+                                    {
+                                        <span class="confirm">Silinsin mi?</span>
+                                        <button type="button" class="btn btn-sm btn-danger" @onclick="() => DeleteAsync(item.Id)">Sil</button>
+                                        <button type="button" class="btn btn-sm" @onclick="() => _confirmDelete = null">Vazgeç</button>
+                                    }
+                                    else
+                                    {
+                                        @if (running is not null)
+                                        {
+                                            <a class="btn btn-sm btn-primary" href="runs/@running.RunId">İzle</a>
+                                        }
+                                        else
+                                        {
+                                            <button type="button" class="btn btn-sm btn-primary" disabled="@_busy" @onclick="() => StartAsync(item.Id)">Başlat</button>
+                                        }
+                                        <a class="btn btn-sm" href="scenarios/@item.Id">Düzenle</a>
+                                        <button type="button" class="btn btn-sm" disabled="@_busy" @onclick="() => DuplicateAsync(item.Id)">Kopyala</button>
+                                        <button type="button" class="btn btn-sm btn-ghost-danger" disabled="@(running is not null)" @onclick="() => _confirmDelete = item.Id">Sil</button>
+                                    }
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    private List<ScenarioSummary>? _items;
+    private StartRunResult? _start;
+    private int? _confirmDelete;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Runs.RunsChanged += OnRunsChanged;
+        _items = await Store.ListAsync();
+    }
+
+    private void OnRunsChanged() => _ = InvokeAsync(async () =>
+    {
+        _items = await Store.ListAsync();
+        StateHasChanged();
+    });
+
+    private async Task StartAsync(int id)
+    {
+        _busy = true;
+        _start = null;
+        try
+        {
+            var result = await Runs.StartRunAsync(id);
+            if (result.Errors.Count == 0)
+                Navigation.NavigateTo($"runs/{result.RunId}");
+            else
+                _start = result;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task DuplicateAsync(int id)
+    {
+        _busy = true;
+        try
+        {
+            if (await Store.DuplicateAsync(id) is { } copyId)
+                Navigation.NavigateTo($"scenarios/{copyId}");
+            else
+                _items = await Store.ListAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task DeleteAsync(int id)
+    {
+        _confirmDelete = null;
+        await Store.DeleteAsync(id);
+        _items = await Store.ListAsync();
+    }
+
+    public void Dispose() => Runs.RunsChanged -= OnRunsChanged;
+}
