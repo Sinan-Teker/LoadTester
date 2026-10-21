@@ -26,6 +26,7 @@
     --danger: #b42e2e;
     --danger-hover: #992525;
     --danger-wash: #fdf1f1;
+    --warning-wash: #fff8e6;
     --sidebar: #1a1a19;
     --sidebar-ink: #c3c2b7;
     --sidebar-ink-strong: #f0efec;
@@ -206,8 +207,9 @@ code {
         position: static;
         height: auto;
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
-        gap: 16px;
+        gap: 8px 16px;
         padding: 10px 16px;
     }
 
@@ -217,6 +219,7 @@ code {
 
     .nav {
         flex-direction: row;
+        flex-wrap: wrap;
     }
 
     .content {
@@ -436,6 +439,12 @@ input:not([type=checkbox]):not([type=radio]), select, textarea {
         outline: none;
         border-color: var(--focus);
         box-shadow: 0 0 0 3px rgba(42, 120, 214, 0.15);
+    }
+
+    input:not([type=checkbox]):not([type=radio]):disabled, select:disabled, textarea:disabled {
+        background: var(--surface-sunken);
+        color: var(--ink-3);
+        cursor: not-allowed;
     }
 
 textarea {
@@ -922,6 +931,12 @@ h1 .status {
         text-decoration: underline;
     }
 
+.alert-warning {
+    background: var(--warning-wash);
+    border-color: rgba(250, 178, 25, 0.5);
+    color: #5c4100;
+}
+
 .empty {
     text-align: center;
     padding: 56px 24px;
@@ -1008,6 +1023,62 @@ h1 .status {
     font-size: 12px;
     color: var(--ink-3);
     margin-top: 2px;
+}
+
+/* ---------- Sitemap warmup ---------- */
+
+.fieldset {
+    border: 0;
+    margin: 0;
+    padding: 0;
+    min-width: 0;
+}
+
+.card-alert {
+    margin: 16px 0 0;
+}
+
+.card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+    margin-top: 16px;
+}
+
+.card-actions-hint {
+    margin-right: auto;
+}
+
+.section-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 28px;
+}
+
+    .section-head .btn {
+        margin-left: auto;
+    }
+
+.section-sub {
+    margin: 4px 0 14px;
+}
+
+.url-link {
+    color: var(--ink);
+}
+
+    .url-link:hover {
+        color: var(--accent);
+    }
+
+.table-note {
+    margin: 0;
+    padding: 10px 20px 14px;
+    border-top: 1px solid var(--line);
 }
 
 /* ---------- Charts ---------- */

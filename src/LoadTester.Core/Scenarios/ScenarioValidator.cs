@@ -195,7 +195,7 @@ public static class ScenarioValidator
         return template;
     }
 
-    private static bool IsHttpUrl(string text) =>
+    internal static bool IsHttpUrl(string text) =>
         Uri.TryCreate(text, UriKind.Absolute, out var uri) && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
 
     /// <summary>Unencrypted address, placeholders or not. HTTP/3 always runs over TLS.</summary>
@@ -207,7 +207,7 @@ public static class ScenarioValidator
         (OperatingSystem.IsWindows() || OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()) && QuicConnection.IsSupported;
 
     /// <summary>RFC 9110 token: visible ASCII without separators.</summary>
-    private static bool IsToken(string text) =>
+    internal static bool IsToken(string text) =>
         text.Length > 0 && text.All(c => c is > ' ' and < '\u007f' && !"()<>@,;:\\\"/[]?={}".Contains(c));
 
     /// <summary>Query parameter names that never need escaping.</summary>

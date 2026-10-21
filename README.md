@@ -27,9 +27,10 @@ Yayına almak için: `dotnet publish src/LoadTester.Web -c Release -o publish` (
 ## Kullanım
 
 1. **Senaryolar → Yeni senaryo** ile senaryoyu oluşturun.
-2. **Kaydet ve başlat** ya da listede **Başlat** ile testi başlatın; canlı izleme sayfası açılır.
-3. Test sürerken istek/sn, yanıt süreleri, sanal kullanıcı sayısı ve hatalar saniye saniye güncellenir. **Testi durdur** ile istediğiniz an bitirebilirsiniz.
-4. Biten testler **Test geçmişi** sayfasında listelenir; **Yeniden çalıştır** senaryonun güncel hâlini tekrar çalıştırır.
+2. İsteğe bağlı: **Sitemap ısınması** sayfasıyla testten önce sitenin önbelleklerini doldurun ([aşağıda](#sitemap-ısınması)).
+3. **Kaydet ve başlat** ya da listede **Başlat** ile testi başlatın; canlı izleme sayfası açılır.
+4. Test sürerken istek/sn, yanıt süreleri, sanal kullanıcı sayısı ve hatalar saniye saniye güncellenir. **Testi durdur** ile istediğiniz an bitirebilirsiniz.
+5. Biten testler **Test geçmişi** sayfasında listelenir; **Yeniden çalıştır** senaryonun güncel hâlini tekrar çalıştırır.
 
 ### Senaryo
 
@@ -110,6 +111,29 @@ HTTP/3'te:
 
 Bağlantı kurulamaması, zaman aşımı, beklenmeyen durum kodu, aranan metnin bulunamaması, değişkenin çıkarılamaması ve seçilen HTTP sürümünün kullanılamaması. Hatalar adım ve neden bazında gruplanarak gösterilir.
 
+### Sitemap ısınması
+
+Önbelleği boş bir sistemde (CDN, ters vekil sunucu, uygulama önbelleği) ilk istekler yavaştır ve test bu soğuk başlangıcı da ölçer. **Sitemap ısınması** sayfası, yük testinden önce sitemap'teki her adresi bir kez isteyerek önbellekleri doldurur:
+
+1. Sitemap okunur. Sitemap dizini (`sitemapindex`) ise listelediği sitemap'ler de okunur (iç içe en çok 3 seviye). Gzip ile sıkıştırılmış (`.xml.gz`) ve satır başına bir adres içeren metin sitemap'leri de desteklenir. Yalnızca site adresi yazılırsa (`https://www.ornek.com`) `/sitemap.xml` okunur.
+2. Bulunan her adrese, tekrar edenler bir kez olmak üzere, sitemap'teki sırayla `GET` isteği gönderilir ve yanıtın tamamı okunur.
+
+**Isınmayı başlat** bunu bir kez yapar. **Durdurana kadar tekrarla** ise **Durdur**'a basılana ya da uygulama kapatılana kadar tur tur tekrarlar; örneğin yük testi sürerken önbellekleri sıcak tutmak için. Her tur sitemap'i yeniden okur, böylece sonradan eklenen sayfalar da ısıtılır. Turlar arasında 1 saniye beklenir. Sitemap'i okunamayan ya da adres bulunamayan tur başarısız sayılır ve sonraki tur 10 saniye sonra başlar; döngü bu durumda da kendiliğinden durmaz. Sayfada çalışan turun ayrıntılarının yanında son 20 turun özeti (süre, adres, başarısız, ortalama ve p95 süre, istek/sn) listelenir.
+
+| Ayar | Açıklama |
+|---|---|
+| Başlıklar | Satır başına `Ad: değer`; sitemap isteklerinde ve her ısınma isteğinde gönderilir. Ör. mobil sürümün önbelleği için `User-Agent`, dil için `Accept-Language`, güvenlik duvarını geçmek için bir anahtar başlığı. |
+| Eş zamanlı istek | Aynı anda gönderilen istek sayısı (1–200, varsayılan 4). Isınma isteklerinin çoğu önbelleği boş sunucuya gider; yüksek değer sunucuyu zorlayabilir. |
+| İstekten sonra bekleme | Her isteğin ardından beklenecek süre (ms); sunucuyu yavaş ısıtmak için. |
+| Zaman aşımı, yönlendirmeler, sertifika hataları | Senaryodaki ayarlarla aynıdır. Sitemap okunurken yönlendirmeler her zaman takip edilir. |
+
+- `User-Agent` verilmezse `LoadTester/1.0` gönderilir. `Accept-Encoding` verilmezse yük testinin gönderdiği `gzip, deflate, br` kullanılır; böylece önbellekte testin isteyeceği sıkıştırılmış sürüm hazırlanır. Verilirse olduğu gibi gönderilir.
+- Çerez saklanmaz, her istek yeni bir ziyaretçi gibidir; bir `Cookie` başlığı tanımlarsanız o gönderilir.
+- Önbellek atlama uygulanmaz. Senaryoda **Önbelleği atla** açıksa testin istekleri önbelleğe uğramaz; ısınmanın etkisi uygulama içindeki önbelleklerle sınırlı kalır.
+- Durumu 200–399 olan adresler başarılı sayılır. Sonuçta durum kodları, hatalı adresler (ilk 500) ve en yavaş 20 adres listelenir; okunamayan sitemap'ler ve atlanan adresler uyarı olarak gösterilir. Isınmayı ikinci kez çalıştırdığınızda ya da tekrarlarken sonraki turlarda sürelerin düşmesi önbelleklerin dolduğunu gösterir.
+- En çok 200.000 adres ve 1.000 sitemap okunur; bir sitemap dosyası 64 MB'tan büyük olamaz.
+- Aynı anda tek ısınma çalışır. Sonuç kaydedilmez; bir sonraki ısınmaya ya da uygulama yeniden başlatılana kadar sayfada görünür.
+
 ## Ölçümler
 
 | Ölçüm | Not |
@@ -125,7 +149,7 @@ Grafikler saniyelik örneklerden çizilir; uzun testlerde okunaklı kalması iç
 ## Proje yapısı
 
 ```
-src/LoadTester.Core          Yük motoru (arayüzden bağımsız): senaryo modeli, doğrulama, şablonlar, metrikler
+src/LoadTester.Core          Yük motoru (arayüzden bağımsız): senaryo modeli, doğrulama, şablonlar, metrikler, sitemap ısınması
 src/LoadTester.Web           Blazor Server arayüzü, SQLite kayıtları, arka planda test yöneticisi
 tests/LoadTester.Core.Tests  Birim testleri ve gerçek bir Kestrel sunucusuna karşı motor testleri
 ```

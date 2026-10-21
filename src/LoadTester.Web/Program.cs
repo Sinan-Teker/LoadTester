@@ -24,6 +24,8 @@ builder.Services.AddSingleton<ScenarioStore>();
 builder.Services.AddSingleton<RunStore>();
 builder.Services.AddSingleton<RunManager>();
 builder.Services.AddHostedService(services => services.GetRequiredService<RunManager>());
+builder.Services.AddSingleton<WarmupManager>();
+builder.Services.AddHostedService(services => services.GetRequiredService<WarmupManager>());
 
 var app = builder.Build();
 

@@ -1,0 +1,308 @@
+@page "/warmup"
+@using System.Globalization
+@implements IDisposable
+@inject WarmupManager Manager
+
+<PageTitle>Sitemap ısınması · LoadTester</PageTitle>
+
+@{
+    var run = Manager.Current;
+    var running = run is { IsFinished: false };
+}
+
+<header class="page-head">
+    <div>
+        <h1>Sitemap ısınması</h1>
+        <p class="page-sub">Yük testinden önce sitemap'teki her adresi bir kez isteyerek sunucu, uygulama ve CDN önbelleklerini ısıtın (warmup).</p>
+    </div>
+</header>
+
+<section class="card">
+    <h2 class="card-title">Ayarlar</h2>
+    <fieldset class="fieldset" disabled="@running">
+        <label class="field">
+            <span class="label">Sitemap adresi</span>
+            <input class="mono" @bind="_form.SitemapUrl" placeholder="https://www.ornek.com/sitemap.xml" spellcheck="false" />
+            <span class="hint">Sitemap dizini ise listelediği sitemap'ler de okunur; gzip (.xml.gz) ve satır başına bir adres içeren metin sitemap'leri de desteklenir. Yalnızca site adresi yazılırsa /sitemap.xml okunur.</span>
+        </label>
+        <label class="field">
+            <span class="label">Başlıklar <span class="optional">(isteğe bağlı)</span></span>
+            <textarea class="mono" rows="4" @bind="_form.HeadersText" spellcheck="false" placeholder="@HeadersPlaceholder"></textarea>
+            <span class="hint">
+                Satır başına <code>Ad: değer</code>; sitemap isteklerinde ve her ısınma isteğinde gönderilir.
+                Verilmezse <code>User-Agent: LoadTester/1.0</code> ve yük testindeki gibi <code>Accept-Encoding: gzip, deflate, br</code> kullanılır.
+            </span>
+        </label>
+        <div class="grid grid-3">
+            <label class="field">
+                <span class="label">Eş zamanlı istek</span>
+                <input type="number" min="1" max="@WarmupValidator.MaxConcurrency" @bind="_form.Concurrency" />
+            </label>
+            <label class="field">
+                <span class="label">Zaman aşımı (sn)</span>
+                <input type="number" min="1" max="600" @bind="_form.TimeoutSeconds" />
+            </label>
+            <label class="field">
+                <span class="label">İstekten sonra bekleme (ms)</span>
+                <input type="number" min="0" max="@WarmupValidator.MaxDelayMs" @bind="_form.DelayMs" />
+            </label>
+        </div>
+        <div class="checks">
+            <label class="check"><input type="checkbox" @bind="_form.FollowRedirects" /> Yönlendirmeleri takip et</label>
+            <label class="check"><input type="checkbox" @bind="_form.IgnoreCertificateErrors" /> Sertifika hatalarını yok say</label>
+        </div>
+    </fieldset>
+
+    @if (_errors.Count > 0)
+    {
+        <div class="alert alert-error card-alert" role="alert">
+            <strong>Isınma başlatılamadı</strong>
+            <ul>
+                @foreach (var error in _errors)
+                {
+                    <li>@error</li>
+                }
+            </ul>
+        </div>
+    }
+
+    <div class="card-actions">
+        <span class="hint card-actions-hint">Tekrarlarken her tur sitemap'i yeniden okur; ısınma Durdur'a basılana kadar sürer.</span>
+        <button type="button" class="btn" disabled="@running" @onclick="() => Start(repeat: true)">Durdurana kadar tekrarla</button>
+        <button type="button" class="btn btn-primary" disabled="@running" @onclick="() => Start(repeat: false)">Isınmayı başlat</button>
+    </div>
+</section>
+
+@if (run is not null)
+{
+    var report = run.Report;
+    var roundLabel = run.Repeat && report is not null ? $"{report.Round}. tur · " : "";
+    <div class="section-head">
+        <h2>Son ısınma</h2>
+        <StatusBadge Status="run.Status" />
+        <span class="muted">@Fmt.Timestamp(run.StartedAt)@(run.Repeat ? " · durdurana kadar tekrar" : "")</span>
+        @if (running)
+        {
+            <button type="button" class="btn btn-sm btn-danger" disabled="@run.StopRequested" @onclick="() => run.StopAsync()">
+                @(run.StopRequested ? "Durduruluyor…" : "Durdur")
+            </button>
+        }
+    </div>
+    <p class="row-sub mono-sub section-sub">@run.Definition.SitemapUrl</p>
+
+    @if (run.Error is not null)
+    {
+        <div class="alert alert-error" role="alert">
+            <strong>Isınma tamamlanamadı</strong>
+            <p>@run.Error</p>
+        </div>
+    }
+
+    @if (report is null)
+    {
+        @if (running && run.Rounds.Count == 0)
+        {
+            <div class="card">
+                <p class="muted no-margin">Sitemap okunuyor…</p>
+            </div>
+        }
+    }
+    else if (report.Phase == WarmupPhase.ReadingSitemaps)
+    {
+        <div class="progress-row">
+            <div class="progress" role="progressbar" aria-label="Isınma ilerlemesi">
+                <div class="progress-fill" style="width:0%"></div>
+            </div>
+            <span class="progress-text">@(roundLabel)Sitemap okunuyor · @Fmt.Count(report.SitemapsRead) sitemap, @Fmt.Count(report.TotalUrls) adres</span>
+        </div>
+    }
+    else if (report.TotalUrls > 0)
+    {
+        var done = (double)report.Completed / report.TotalUrls;
+        <div class="progress-row">
+            <div class="progress" role="progressbar" aria-label="Isınma ilerlemesi" aria-valuemin="0" aria-valuemax="@report.TotalUrls" aria-valuenow="@report.Completed">
+                <div class="progress-fill" style="width:@Width(done)"></div>
+            </div>
+            <span class="progress-text">@(roundLabel)@Fmt.Count(report.Completed) / @Fmt.Count(report.TotalUrls) adres · @Fmt.Clock(report.ElapsedSeconds)</span>
+        </div>
+
+        <section class="stats" aria-label="Özet">
+            <StatTile Label="Adres" Value="@Fmt.Count(report.TotalUrls)" Note="@($"{Fmt.Count(report.SitemapsRead)} sitemap okundu")" />
+            <StatTile Label="Tamamlanan" Value="@Fmt.Count(report.Completed)" Note="@Fmt.Percent(done)" />
+            <StatTile Label="Başarısız" Value="@Fmt.Count(report.Failed)" Note="@($"hata oranı {Fmt.Percent(report.FailureRate)}")" />
+            <StatTile Label="Ortalama süre" Value="@Fmt.Ms(report.Latency?.MeanMs)" Note="@(report.Latency is { } latency ? $"p95 {Fmt.Ms(latency.P95Ms)}" : null)" />
+            <StatTile Label="İstek/sn" Value="@Fmt.Rate(report.RequestsPerSecond)" Note="ortalama" />
+        </section>
+    }
+
+    @if (run.Rounds.Count > 0)
+    {
+        <section class="card card-flush">
+            <h2 class="card-title">Turlar</h2>
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th class="num shrink">Tur</th>
+                            <th class="shrink">Başlangıç</th>
+                            <th class="num">Süre</th>
+                            <th class="num">Adres</th>
+                            <th class="num">Başarısız</th>
+                            <th class="num">Ortalama</th>
+                            <th class="num">p95</th>
+                            <th class="num">İstek/sn</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var round in run.Rounds)
+                        {
+                            <tr @key="round.Number">
+                                <td class="num">@round.Number</td>
+                                <td class="nowrap">@Fmt.Time(round.StartedAt)</td>
+                                @if (round is { Error: null, Report: { } roundReport })
+                                {
+                                    <td class="num">@Fmt.Duration(roundReport.ElapsedSeconds)</td>
+                                    <td class="num">@Fmt.Count(roundReport.TotalUrls)</td>
+                                    <td class="num">@Fmt.Count(roundReport.Failed)</td>
+                                    <td class="num">@Fmt.Ms(roundReport.Latency?.MeanMs)</td>
+                                    <td class="num">@Fmt.Ms(roundReport.Latency?.P95Ms)</td>
+                                    <td class="num">@Fmt.Rate(roundReport.RequestsPerSecond)</td>
+                                }
+                                else
+                                {
+                                    <td class="error-text" colspan="6">@round.Error</td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            @if (run.Rounds[0].Number > run.Rounds.Count)
+            {
+                <p class="hint table-note">Son @run.Rounds.Count tur gösteriliyor.</p>
+            }
+        </section>
+    }
+
+    @if (report is { Phase: not WarmupPhase.ReadingSitemaps })
+    {
+        @if (report.Warnings.Count > 0)
+        {
+            <div class="alert alert-warning">
+                <strong>Sitemap uyarıları</strong>
+                <ul>
+                    @foreach (var warning in report.Warnings)
+                    {
+                        <li>@warning</li>
+                    }
+                </ul>
+            </div>
+        }
+
+        @if (report.StatusCodes.Count > 0)
+        {
+            <section class="card">
+                <h2 class="card-title">Durum kodları</h2>
+                <div class="codes">
+                    @foreach (var status in report.StatusCodes)
+                    {
+                        <span class="code code-@(status.Code / 100)xx">@status.Code <span class="muted">× @Fmt.Count(status.Count)</span></span>
+                    }
+                </div>
+            </section>
+        }
+
+        @if (report.Failures.Count > 0)
+        {
+            <section class="card card-flush">
+                <h2 class="card-title">Hatalı adresler</h2>
+                <div class="table-wrap">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Adres</th>
+                                <th>Neden</th>
+                                <th class="num shrink">Süre</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var failure in report.Failures)
+                            {
+                                <tr>
+                                    <td class="mono-sub"><a class="url-link" href="@failure.Url" target="_blank" rel="noopener noreferrer">@Fmt.Url(failure.Url)</a></td>
+                                    <td class="error-text">@failure.Error</td>
+                                    <td class="num">@Fmt.Ms(failure.DurationMs)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                @if (report.Failed > report.Failures.Count)
+                {
+                    <p class="hint table-note">İlk @Fmt.Count(report.Failures.Count) hatalı adres gösteriliyor; toplam @Fmt.Count(report.Failed).</p>
+                }
+            </section>
+        }
+
+        @if (report.Slowest.Count > 0)
+        {
+            <section class="card card-flush">
+                <h2 class="card-title">En yavaş adresler</h2>
+                <div class="table-wrap">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Adres</th>
+                                <th class="shrink">Durum</th>
+                                <th class="num shrink">Süre</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var result in report.Slowest)
+                            {
+                                <tr>
+                                    <td class="mono-sub"><a class="url-link" href="@result.Url" target="_blank" rel="noopener noreferrer">@Fmt.Url(result.Url)</a></td>
+                                    <td><span class="code code-@(result.StatusCode / 100)xx">@result.StatusCode</span></td>
+                                    <td class="num">@Fmt.Ms(result.DurationMs)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        }
+    }
+}
+
+@code {
+    // Attribute values are set verbatim, so the line break is written here.
+    private const string HeadersPlaceholder = "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)\nAccept-Language: tr-TR";
+
+    private WarmupForm _form = null!;
+    private List<string> _errors = [];
+
+    protected override void OnInitialized()
+    {
+        // Starts from the last warmup's settings, so warming up again is one click.
+        _form = WarmupForm.From(Manager.Current?.Definition ?? new WarmupDefinition());
+        Manager.Changed += OnChanged;
+    }
+
+    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private void Start(bool repeat)
+    {
+        var errors = new List<string>();
+        var definition = _form.ToDefinition(errors);
+        errors.AddRange(WarmupValidator.Validate(definition));
+        if (errors.Count == 0)
+            errors.AddRange(Manager.Start(definition, repeat));
+
+        _errors = errors.Distinct().ToList();
+    }
+
+    private static string Width(double ratio) =>
+        (Math.Clamp(ratio, 0, 1) * 100).ToString("0.##", CultureInfo.InvariantCulture) + "%";
+
+    public void Dispose() => Manager.Changed -= OnChanged;
+}

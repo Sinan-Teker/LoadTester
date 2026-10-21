@@ -71,9 +71,16 @@ public static class Fmt
             : $"{time.Minutes:00}:{time.Seconds:00}";
     }
 
+    /// <summary>An address as people read it: percent-encoded letters such as ğ and ü are shown decoded.</summary>
+    public static string Url(string url) => Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.ToString() : url;
+
     /// <summary>Stored UTC time shown in the server's local time zone.</summary>
     public static string Timestamp(DateTime utc) =>
         DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToLocalTime().ToString("dd.MM.yyyy HH:mm", Tr);
+
+    /// <summary>Time of day with seconds in the server's local time zone, for events within one session.</summary>
+    public static string Time(DateTime utc) =>
+        DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToLocalTime().ToString("HH:mm:ss", Tr);
 
     public static string LoadSummary(LoadProfile load) =>
         $"{Count(load.PeakTarget)} {LoadUnit(load.Mode)} · {Duration(load.TotalSeconds)}";

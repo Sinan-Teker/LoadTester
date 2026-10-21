@@ -316,7 +316,7 @@ public sealed class LoadTestEngine
             user.RenewClient();
     }
 
-    private static string Describe(HttpRequestException exception)
+    internal static string Describe(HttpRequestException exception)
     {
         var message = exception.HttpRequestError switch
         {
@@ -333,7 +333,7 @@ public sealed class LoadTestEngine
         return Shorten(message);
     }
 
-    private static string Shorten(string message) => message.Length <= 200 ? message : message[..200] + "…";
+    internal static string Shorten(string message) => message.Length <= 200 ? message : message[..200] + "…";
 
     private static long ToMicroseconds(TimeSpan elapsed) => elapsed.Ticks / TimeSpan.TicksPerMicrosecond;
 

@@ -89,7 +89,7 @@ internal sealed class CompiledScenario
 
 internal sealed class CompiledStep
 {
-    private const string DefaultUserAgent = "LoadTester/1.0";
+    internal const string DefaultUserAgent = "LoadTester/1.0";
 
     private static readonly HashSet<string> ContentHeaderNames = new(StringComparer.OrdinalIgnoreCase)
     {
